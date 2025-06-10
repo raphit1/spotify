@@ -1,113 +1,97 @@
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const SpotifyWebApi = require('spotify-web-api-node');
 require('dotenv').config();
+const express = require('express');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const axios = require('axios');
 
-const CHANNEL_ID = '1381864670511501323';
+const app = express();
+const port = process.env.PORT || 3000;
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
-  partials: [Partials.Channel],
+// --- Serveur Express pour gérer le callback Spotify ---
+app.get('/callback', async (req, res) => {
+  const code = req.query.code;
+  if (!code) return res.status(400).send("❌ Pas de code dans la requête.");
+
+  // Ici tu peux appeler ta fonction pour échanger le code contre un token
+  // Exemple simple pour afficher le code et inviter à l'utiliser ailleurs
+  res.send(`
+    <h2>✅ Code Spotify reçu :</h2>
+    <p>${code}</p>
+    <p>Utilise ce code dans ton bot pour obtenir un access token.</p>
+  `);
+
+  console.log("Code Spotify reçu:", code);
+
+  // Exemple d’échange token (à compléter et appeler ici si tu veux)
+  // await exchangeCodeForToken(code);
 });
 
-const spotifyApi = new SpotifyWebApi({
-  clientId: process.env.SPOTIFY_CLIENT_ID,
-  clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-  redirectUri: process.env.SPOTIFY_REDIRECT_URI,
+// Démarrer Express
+app.listen(port, () => {
+  console.log(`Serveur Express lancé sur le port ${port}`);
 });
 
-spotifyApi.setAccessToken(process.env.SPOTIFY_ACCESS_TOKEN);
+// --- Bot Discord ---
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-const commands = [
-  new SlashCommandBuilder()
-    .setName('musique')
-    .setDescription('Affiche la musique Spotify en cours')
-].map(cmd => cmd.toJSON());
-
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-
-async function deployCommands() {
-  try {
-    console.log('Déploiement des commandes...');
-    await rest.put(
-      Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-      { body: commands }
-    );
-    console.log('Commandes déployées.');
-  } catch (error) {
-    console.error('Erreur déploiement commandes:', error);
-  }
-}
-
-client.once('ready', async () => {
-  console.log(`Bot prêt: ${client.user.tag}`);
-  await deployCommands();
+client.once('ready', () => {
+  console.log(`Bot Discord connecté en tant que ${client.user.tag}`);
 });
 
 client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand() && !interaction.isButton()) return;
-  if (interaction.channelId !== CHANNEL_ID) {
-    if (interaction.isChatInputCommand()) {
-      return interaction.reply({ content: "Commande interdite ici.", ephemeral: true });
-    }
-    return;
+  if (!interaction.isButton()) return;
+
+  if (interaction.channelId !== process.env.CHANNEL_ID) {
+    return interaction.reply({ content: "Ce bot ne fonctionne que dans le salon autorisé.", ephemeral: true });
   }
 
-  if (interaction.isChatInputCommand()) {
-    if (interaction.commandName === 'musique') {
-      try {
-        const playback = await spotifyApi.getMyCurrentPlaybackState();
-        if (!playback.body || !playback.body.is_playing) {
-          return interaction.reply("Aucune musique en cours.");
-        }
+  if (interaction.customId === 'spotify_auth') {
+    const authUrl = 
+      `https://accounts.spotify.com/authorize?client_id=${process.env.SPOTIFY_CLIENT_ID}` +
+      `&response_type=code&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}` +
+      `&scope=user-read-playback-state user-modify-playback-state`;
 
-        const track = playback.body.item;
-        const artists = track.artists.map(a => a.name).join(', ');
-
-        const embed = {
-          title: track.name,
-          description: `Artiste(s) : ${artists}\nAlbum : ${track.album.name}`,
-          thumbnail: { url: track.album.images[0].url },
-          url: track.external_urls.spotify,
-          color: 0x1DB954,
-        };
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId('refresh_spotify')
-            .setLabel('Rafraîchir')
-            .setStyle(ButtonStyle.Primary)
-        );
-
-        await interaction.reply({ embeds: [embed], components: [row] });
-      } catch {
-        await interaction.reply({ content: "Erreur Spotify.", ephemeral: true });
-      }
-    }
-  } else if (interaction.isButton()) {
-    if (interaction.customId === 'refresh_spotify') {
-      try {
-        const playback = await spotifyApi.getMyCurrentPlaybackState();
-        if (!playback.body || !playback.body.is_playing) {
-          return interaction.update({ content: "Aucune musique en cours.", embeds: [], components: [] });
-        }
-
-        const track = playback.body.item;
-        const artists = track.artists.map(a => a.name).join(', ');
-
-        const embed = {
-          title: track.name,
-          description: `Artiste(s) : ${artists}\nAlbum : ${track.album.name}`,
-          thumbnail: { url: track.album.images[0].url },
-          url: track.external_urls.spotify,
-          color: 0x1DB954,
-        };
-
-        await interaction.update({ embeds: [embed], components: [interaction.message.components[0]] });
-      } catch {
-        await interaction.update({ content: "Erreur Spotify.", embeds: [], components: [] });
-      }
-    }
+    await interaction.reply({ content: `Clique ici pour autoriser Spotify :\n${authUrl}`, ephemeral: true });
   }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// Commande simple pour envoyer un bouton d’auth Spotify dans le salon
+client.on('messageCreate', async message => {
+  if (message.channel.id !== process.env.CHANNEL_ID) return;
+  if (message.author.bot) return;
+  if (message.content.toLowerCase() === '!spotify') {
+    const row = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId('spotify_auth')
+          .setLabel('Connecter Spotify')
+          .setStyle(ButtonStyle.Primary),
+      );
+
+    await message.channel.send({ content: 'Clique sur le bouton pour connecter Spotify :', components: [row] });
+  }
+});
+
+// Login Discord
+client.login(process.env.DISCORD_BOT_TOKEN);
+
+// --- Exemple fonction pour échanger le code contre un token (à compléter) ---
+async function exchangeCodeForToken(code) {
+  try {
+    const params = new URLSearchParams();
+    params.append('grant_type', 'authorization_code');
+    params.append('code', code);
+    params.append('redirect_uri', process.env.REDIRECT_URI);
+
+    const response = await axios.post('https://accounts.spotify.com/api/token', params, {
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+
+    console.log('Access token:', response.data.access_token);
+    // Ici tu peux stocker tokens pour réutiliser
+  } catch (error) {
+    console.error('Erreur échange token Spotify:', error.response?.data || error.message);
+  }
+}
