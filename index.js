@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Events } = require('discord.js');
 const axios = require('axios');
 
 const app = express();
@@ -11,53 +11,55 @@ app.get('/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send("❌ Pas de code dans la requête.");
 
-  // Ici tu peux appeler ta fonction pour échanger le code contre un token
-  // Exemple simple pour afficher le code et inviter à l'utiliser ailleurs
   res.send(`
     <h2>✅ Code Spotify reçu :</h2>
     <p>${code}</p>
-    <p>Utilise ce code dans ton bot pour obtenir un access token.</p>
+    <p>Le bot va tenter d'échanger ce code contre un access token.</p>
   `);
 
   console.log("Code Spotify reçu:", code);
 
-  // Exemple d’échange token (à compléter et appeler ici si tu veux)
-  // await exchangeCodeForToken(code);
+  await exchangeCodeForToken(code);
 });
 
-// Démarrer Express
 app.listen(port, () => {
   console.log(`Serveur Express lancé sur le port ${port}`);
 });
 
 // --- Bot Discord ---
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-client.once('ready', () => {
-  console.log(`Bot Discord connecté en tant que ${client.user.tag}`);
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
-client.on('interactionCreate', async interaction => {
+client.once(Events.ClientReady, () => {
+  console.log(`✅ Bot Discord connecté en tant que ${client.user.tag}`);
+});
+
+client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isButton()) return;
 
   if (interaction.channelId !== process.env.CHANNEL_ID) {
-    return interaction.reply({ content: "Ce bot ne fonctionne que dans le salon autorisé.", ephemeral: true });
+    return interaction.reply({ content: "❌ Ce bot ne fonctionne que dans le salon autorisé.", ephemeral: true });
   }
 
   if (interaction.customId === 'spotify_auth') {
-    const authUrl = 
+    const authUrl =
       `https://accounts.spotify.com/authorize?client_id=${process.env.SPOTIFY_CLIENT_ID}` +
       `&response_type=code&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}` +
       `&scope=user-read-playback-state user-modify-playback-state`;
 
-    await interaction.reply({ content: `Clique ici pour autoriser Spotify :\n${authUrl}`, ephemeral: true });
+    await interaction.reply({ content: `👉 [Connecte ton Spotify ici](${authUrl})`, ephemeral: true });
   }
 });
 
-// Commande simple pour envoyer un bouton d’auth Spotify dans le salon
-client.on('messageCreate', async message => {
+client.on(Events.MessageCreate, async message => {
   if (message.channel.id !== process.env.CHANNEL_ID) return;
   if (message.author.bot) return;
+
   if (message.content.toLowerCase() === '!spotify') {
     const row = new ActionRowBuilder()
       .addComponents(
@@ -67,14 +69,16 @@ client.on('messageCreate', async message => {
           .setStyle(ButtonStyle.Primary),
       );
 
-    await message.channel.send({ content: 'Clique sur le bouton pour connecter Spotify :', components: [row] });
+    await message.channel.send({
+      content: '🎵 Clique sur le bouton pour connecter Spotify :',
+      components: [row]
+    });
   }
 });
 
-// Login Discord
 client.login(process.env.DISCORD_BOT_TOKEN);
 
-// --- Exemple fonction pour échanger le code contre un token (à compléter) ---
+// --- Fonction échange code vers access token ---
 async function exchangeCodeForToken(code) {
   try {
     const params = new URLSearchParams();
@@ -89,9 +93,11 @@ async function exchangeCodeForToken(code) {
       },
     });
 
-    console.log('Access token:', response.data.access_token);
-    // Ici tu peux stocker tokens pour réutiliser
+    console.log('✅ Access token Spotify :', response.data.access_token);
+    console.log('🔄 Refresh token Spotify :', response.data.refresh_token);
+
+    // Ici tu peux enregistrer le token quelque part si tu veux
   } catch (error) {
-    console.error('Erreur échange token Spotify:', error.response?.data || error.message);
+    console.error('❌ Erreur échange token Spotify:', error.response?.data || error.message);
   }
 }
