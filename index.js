@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Events } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, Events } = require('discord.js');
 const axios = require('axios');
 
 const app = express();
@@ -43,7 +43,8 @@ client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isButton()) return;
 
   if (interaction.channelId !== process.env.CHANNEL_ID) {
-    return interaction.reply({ content: "❌ Ce bot ne fonctionne que dans le salon autorisé.", ephemeral: true });
+    await interaction.reply({ content: "❌ Ce bot ne fonctionne que dans le salon autorisé.", ephemeral: true });
+    return;
   }
 
   if (interaction.customId === 'spotify_auth') {
@@ -52,6 +53,7 @@ client.on(Events.InteractionCreate, async interaction => {
       `&response_type=code&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}` +
       `&scope=user-read-playback-state user-modify-playback-state`;
 
+    // Répondre immédiatement à l’interaction
     await interaction.reply({ content: `👉 [Connecte ton Spotify ici](${authUrl})`, ephemeral: true });
   }
 });
@@ -96,7 +98,7 @@ async function exchangeCodeForToken(code) {
     console.log('✅ Access token Spotify :', response.data.access_token);
     console.log('🔄 Refresh token Spotify :', response.data.refresh_token);
 
-    // Ici tu peux enregistrer le token quelque part si tu veux
+    // Ici tu peux stocker les tokens pour usage futur
   } catch (error) {
     console.error('❌ Erreur échange token Spotify:', error.response?.data || error.message);
   }
